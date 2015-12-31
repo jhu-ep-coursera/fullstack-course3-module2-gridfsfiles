@@ -1,0 +1,49 @@
+<p id="notice"><%= notice %></p>
+
+<p>
+  <strong>Filename:</strong>
+  <%= @grid_fs_file.filename %>
+</p>
+
+<p>
+  <strong>Contenttype:</strong>
+  <%= @grid_fs_file.contentType %>
+</p>
+
+<p>
+  <strong>Author:</strong>
+  <%= @grid_fs_file.author %>
+</p>
+
+<p>
+  <strong>Topic:</strong>
+  <%= @grid_fs_file.topic %>
+</p>
+
+<p>
+  <strong>Uploaddate:</strong>
+  <%= @grid_fs_file.uploadDate %>
+</p>
+
+<p>
+  <strong>Length:</strong>
+  <%= @grid_fs_file.length %>
+</p>
+
+<p>
+  <strong>Chunksize:</strong>
+  <%= @grid_fs_file.chunkSize %>
+</p>
+
+<p>
+  <strong>Md5:</strong>
+  <%= @grid_fs_file.md5 %>
+</p>
+
+<p>
+  <strong>Contents:</strong>
+  <img height="500px" width="650px" src= <%= contents_path("#{@grid_fs_file.id}")%>/>
+</p>
+
+<%= link_to 'Edit', edit_grid_fs_file_path(@grid_fs_file) %> |
+<%= link_to 'Back', grid_fs_files_path %>

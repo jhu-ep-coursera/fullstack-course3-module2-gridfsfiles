@@ -1,0 +1,436 @@
+<h1 id="example-gridfs-rails-file-server">Example: GridFS Rails File Server</h1>
+<p>In this example, we will create a bare bones, web-based file server that we can upload, store, get, and download contents from. The application will be backed by GridFS. Access to GridFS will be done through a model class implemented to work with the Rails scaffold. Much of the model will be assembled and tested using <code>rails console</code> prior to addig the controller and view.</p>
+<h2 id="highlights">Highlights</h2>
+<p><a href="./index.jpg">index page</a></p>
+<p><a href="./show.jpg">show page</a></p>
+<ol style="list-style-type: decimal">
+<li><p>Files are uploaded using the browser and the <code>f.file_field</code> option <code>(app/views/grid_fs_files/_form.html.erb )</code>.</p>
+<pre class="sourceCode html"><code class="sourceCode html"><span class="kw">&lt;div</span><span class="ot"> class=</span><span class="st">&quot;field&quot;</span><span class="kw">&gt;</span>
+  <span class="er">&lt;</span>%= f.label :contents %&gt;<span class="kw">&lt;br&gt;</span>
+  <span class="er">&lt;</span>%= f.file_field :contents %&gt;
+<span class="kw">&lt;/div&gt;</span></code></pre></li>
+<li><p>The object type supplied for <code>contents</code> by Rails is an <code>ActionDispatch::Http::UploadedFile</code>.</p>
+<pre class="sourceCode ruby"><code class="sourceCode ruby"><span class="co">#&lt;ActionDispatch::Http::UploadedFile:0x00000005597018&gt;</span></code></pre></li>
+<li><p>The <code>UploadedFile</code> can be read directly into the <code>Grid::File</code> with the hash of file description properties. The root level keys in the hash are standard within GridFS. The keys below <code>metadata</code> are user-defined. Note that GridFS uses <code>snake_case</code> keys in the <code>Grid::File</code> object but uses <code>camelCase</code> in the hash info interface we will see later.</p>
+<pre class="sourceCode ruby"><code class="sourceCode ruby">description = {<span class="st">:filename=</span>&gt;<span class="ot">@filename</span>, 
+               <span class="st">:content_type=</span>&gt;<span class="ot">@contentType</span>,
+               <span class="st">:metadata</span> =&gt; {<span class="st">:author</span> =&gt; <span class="ot">@author</span>, <span class="st">:topic</span> =&gt; <span class="ot">@topic</span>}}
+grid_file = <span class="dt">Mongo</span>::<span class="dt">Grid</span>::<span class="dt">File</span>.new(<span class="ot">@contents</span>.read, description )
+id=<span class="dv">self</span>.class.mongo_client.database.fs.insert_one(grid_file)
+<span class="ot">@id</span>=id.to_s</code></pre></li>
+<li><p>The file is accessed by a URI that can be defined using an <code>img</code> tag (<code>app/views/grid_fs_files/show.html.erb</code>).</p>
+<pre><code>&lt;p&gt;
+  &lt;strong&gt;Contents:&lt;/strong&gt;
+  &lt;img height=&quot;500px&quot; width=&quot;650px&quot; src= &lt;%= contents_path(&quot;#{@grid_fs_file.id}&quot;)%&gt;/&gt;
+&lt;/p&gt;</code></pre></li>
+<li><p>This URI is defined using a <code>GET</code> in the <code>routes.rb</code> file mapped to the controller <code>contents</code> action. (<code>config/routes.rb</code>). By defining this as <code>contents</code> resource, we get the helper method <code>contents_path</code> used above.</p>
+<pre class="sourceCode ruby"><code class="sourceCode ruby">get <span class="st">&#39;/grid_fs_files/contents/:id/&#39;</span>, to: <span class="st">&#39;grid_fs_files#contents&#39;</span>, as: <span class="st">&#39;contents&#39;</span></code></pre></li>
+<li><p>The controller method accesses the data from the contents attribute and sends this back to the web caller with a few HTTP properties. For example, by supplying <code>filename</code>, the file will default to the name provided in the model.</p>
+<pre class="sourceCode ruby"><code class="sourceCode ruby"><span class="kw">class</span> <span class="dt">GridFsFilesController</span> &lt; <span class="dt">ApplicationController</span>
+  before_action <span class="st">:set_grid_fs_file</span>, only: [<span class="st">:show</span>, <span class="st">:edit</span>, <span class="st">:update</span>, <span class="st">:destroy</span>, <span class="st">:contents</span>]
+
+  <span class="kw">def</span> contents
+    send_data <span class="ot">@grid_fs_file</span>.contents, 
+              {filename: <span class="ot">@grid_fs_file</span>.filename, 
+               type: <span class="ot">@grid_fs_file</span>.contentType, 
+               disposition: <span class="st">&#39;inline&#39;</span>}
+  <span class="kw">end</span></code></pre></li>
+<li><p>The getter for <code>contents</code> is provided by a custom implementation that locates the GridFS content by <code>id</code> and returns a buffer with the data from each chunk.</p></li>
+</ol>
+<p>def contents f=self.class.mongo_client.database.fs.find_one({:<em>id=&gt;BSON::ObjectId.from</em>string(<span class="citation">@id</span>)}) buffer = &quot;&quot; f.chunks.reduce([]) { |x,chunk| buffer &lt;&lt; chunk.data.data } return buffer end</p>
+<h2 id="infrastructure">Infrastructure</h2>
+<p>This section will lightly show the steps required to get the supporting part of the demo in place.</p>
+<h3 id="create-the-rails-application-and-setup-mongodb-connection">Create The Rails Application and Setup MongoDB Connection</h3>
+<ol style="list-style-type: decimal">
+<li><p>Create the application</p>
+<pre class="shell"><code>$ rails new gridfsfiles
+$ cd gridfsfiles</code></pre></li>
+<li><p>Add gems to <code>Gemfile</code></p>
+<p>Mongoid is required for the connection management. It will automatically bring in mongo (MongDB Ruby Driver) -- which is still the focus of this lesson. However, you can specify both using the following.</p>
+<pre class="sourceCode ruby"><code class="sourceCode ruby">gem <span class="st">&#39;mongo&#39;</span>, <span class="st">&#39;~&gt; 2.1.0&#39;</span>
+gem <span class="st">&#39;mongoid&#39;</span>, <span class="st">&#39;~&gt; 5.0.0&#39;</span></code></pre>
+<p>This brought in the following versions when the example was written.</p>
+<pre class="shell"><code>$bundle 
+Using mongo 2.1.2
+Using mongoid 5.0.1</code></pre></li>
+<li><p>Create the Mongoid Connection Configuration File</p>
+<pre class="shell"><code>$ rails g mongoid:config
+      create  config/mongoid.yml</code></pre>
+<p>This creates a configuration with usable defaults for the <code>development</code> (and <code>test</code>) profile.</p>
+<pre class="shell"><code>$ egrep -v &#39;\#|^$&#39; config/mongoid.yml 
+development:
+  clients:
+    default:
+      database: gridfsfiles_development
+      hosts:
+        - localhost:27017
+      options:
+  options:
+  ...</code></pre></li>
+<li><p>Load the Mongoid Configuration File into Rails Application</p>
+<p><code>config/application.rb</code></p>
+<pre class="sourceCode ruby"><code class="sourceCode ruby"><span class="kw">module</span> <span class="dt">Gridfsfiles</span>
+  <span class="kw">class</span> <span class="dt">Application</span> &lt; <span class="dt">Rails</span>::<span class="dt">Application</span>
+    ...
+    <span class="co">#bootstraps mongoid within applications -- like rails console</span>
+    <span class="dt">Mongoid</span>.load!(<span class="st">&#39;./config/mongoid.yml&#39;</span>)
+    ...
+  <span class="kw">end</span>
+<span class="kw">end</span></code></pre></li>
+</ol>
+<h2 id="create-gridfs-model-class-for-file-content">Create GridFS Model Class for File Content</h2>
+<h3 id="create-gridfs-model-class">Create GridFS Model Class</h3>
+<ol style="list-style-type: decimal">
+<li><p>Create a GridFsFile model class to implement interactions between our application and GridFS. Start with the core properties required by the Rails scaffold like we saw with the <code>zips</code> application.</p>
+<p><code>app/models/grid_fs_file.rb</code></p>
+<pre class="sourceCode ruby"><code class="sourceCode ruby"><span class="kw">class</span> <span class="dt">GridFsFile</span>
+  include <span class="dt">ActiveModel</span>::<span class="dt">Model</span>
+  <span class="ot">attr_accessor</span> <span class="st">:id</span>
+
+  <span class="kw">def</span> persisted?
+    !<span class="ot">@id</span>.nil?
+  <span class="kw">end</span>
+  <span class="kw">def</span> created_at
+    <span class="dv">nil</span>
+  <span class="kw">end</span>
+  <span class="kw">def</span> updated_at
+    <span class="dv">nil</span>
+  <span class="kw">end</span>
+<span class="kw">end</span></code></pre></li>
+<li><p>Create some file attributes to track for the contents. Start by locating properties we get from GridFS. Know that the metadata property is user-defined.</p>
+<pre class="sourceCode ruby"><code class="sourceCode ruby">&gt; pp c.database.fs.find.first
+{<span class="st">&quot;_id&quot;</span>=&gt;<span class="dt">BSON</span>::<span class="dt">ObjectId</span>(<span class="st">&#39;5642f149e301d09ce9000009&#39;</span>),
+ <span class="st">&quot;chunkSize&quot;</span>=&gt;<span class="dv">261120</span>,
+ <span class="st">&quot;uploadDate&quot;</span>=&gt;<span class="dv">2015-11-11</span> <span class="bn">07</span>:<span class="dv">41</span>:<span class="dv">50</span> <span class="dt">UTC</span>,
+ <span class="st">&quot;contentType&quot;</span>=&gt;<span class="st">&quot;image/jpeg&quot;</span>,
+ <span class="st">&quot;filename&quot;</span>=&gt;<span class="st">&quot;myfile.jpg&quot;</span>,
+ <span class="st">&quot;metadata&quot;</span>=&gt;{<span class="st">&quot;author&quot;</span>=&gt;<span class="st">&quot;kiran&quot;</span>, <span class="st">&quot;topic&quot;</span>=&gt;<span class="st">&quot;nice spot&quot;</span>},
+ <span class="st">&quot;length&quot;</span>=&gt;<span class="dv">307797</span>,
+ <span class="st">&quot;md5&quot;</span>=&gt;<span class="st">&quot;3468ca1c23cc13ac6af493c4642cc72a&quot;</span>}</code></pre>
+<p>Define the above GridFS properties as attributes of the model class. Lets use the same camel case as GridFS to keep things consistent between Rails and GridFS hashes as possible. Add in metadata properties of <code>author</code> and <code>topic</code> as an example of tracking additional data. We also have refined the attributes into read/write, read-only, and write-only accesses. The GridFS descriptive information -- including the metadata we define -- is updatable at any time. <code>id</code>, <code>chunkSize</code>, <code>length</code>, and <code>md5</code> are all internally generated so we just define getters for those. <code>contents</code> is special. We will define a custom getter for it shortly.</p>
+<pre class="sourceCode ruby"><code class="sourceCode ruby"><span class="kw">class</span> <span class="dt">GridFsFile</span>
+  include <span class="dt">ActiveModel</span>::<span class="dt">Model</span>
+  <span class="ot">attr_accessor</span> <span class="st">:contentType</span>, <span class="st">:filename</span>, <span class="st">:author</span>, <span class="st">:topic</span>
+  <span class="ot">attr_writer</span> <span class="st">:contents</span>
+  <span class="ot">attr_reader</span> <span class="st">:id</span>, <span class="st">:uploadDate</span>, <span class="st">:chunkSize</span>, <span class="st">:length</span>, <span class="st">:md5</span></code></pre>
+<p>Define an <code>initialize</code> method from a hash that can process hash keys produced by GridFS and Rails. Remember that MongoDB uses ':_id<code>for its primary key and Rails scaffold expects to use</code>:id'. Note too that since our custom <code>author</code> and <code>topic</code> fields are scoped below the GridFS <code>metadata</code> property, we can leverage the same <code>id</code> parameter test to determine whether we are representing this internally or externally.</p>
+<pre class="sourceCode ruby"><code class="sourceCode ruby"><span class="kw">def</span> initialize(params={})
+  <span class="kw">if</span> params[<span class="st">:_id</span>]  <span class="co">#hash came from GridFS</span>
+    <span class="ot">@id</span>=params[<span class="st">:_id</span>].to_s
+    <span class="ot">@author</span>=params[<span class="st">:metadata</span>].nil? ? <span class="dv">nil</span> : params[<span class="st">:metadata</span>][<span class="st">:author</span>]
+    <span class="ot">@topic</span>=params[<span class="st">:metadata</span>].nil? ? <span class="dv">nil</span> : params[<span class="st">:metadata</span>][<span class="st">:topic</span>]
+  <span class="kw">else</span>              <span class="co">#assume hash came from Rails</span>
+    <span class="ot">@id</span>=params[<span class="st">:id</span>]
+    <span class="ot">@author</span>=params[<span class="st">:author</span>]
+    <span class="ot">@topic</span>=params[<span class="st">:topic</span>]
+  <span class="kw">end</span>
+  <span class="ot">@chunkSize</span>=params[<span class="st">:chunkSize</span>]
+  <span class="ot">@uploadDate</span>=params[<span class="st">:uploadDate</span>]
+  <span class="ot">@contentType</span>=params[<span class="st">:contentType</span>]
+  <span class="ot">@filename</span>=params[<span class="st">:filename</span>]
+  <span class="ot">@length</span>=params[<span class="st">:length</span>]
+  <span class="ot">@md5</span>=params[<span class="st">:md5</span>]
+  <span class="ot">@contents</span>=params[<span class="st">:contents</span>]
+<span class="kw">end</span></code></pre></li>
+</ol>
+<h3 id="add-mongodb-connection">Add MongoDB Connection</h3>
+<pre><code>```ruby
+  def self.mongo_client
+    @@db ||= Mongoid::Clients.default
+  end
+```</code></pre>
+<h3 id="add-save-capability">Add Save Capability</h3>
+<ol style="list-style-type: decimal">
+<li>Add an instance method to save the current instance.
+<ul>
+<li>the file data will from from an IO object stored in the <code>contents</code> attribute</li>
+<li>an optional description is populate with file info, includig user-defined metadata</li>
+<li>the <code>Grid::File</code> is inserted into GridFS and a primary key is returned</li>
+<li>Note that the optional description takes a snake_case <code>content_type</code>, rather than the camelCase used in the upcoming find results.</li>
+</ul>
+<pre class="sourceCode ruby"><code class="sourceCode ruby">  <span class="kw">def</span> save
+    description = {}
+    description[<span class="st">:filename</span>]=<span class="ot">@filename</span>         <span class="kw">if</span> !<span class="ot">@filename</span>.nil?
+    description[<span class="st">:content_type</span>]=<span class="ot">@contentType</span>  <span class="kw">if</span> !<span class="ot">@contentType</span>.nil?
+    <span class="kw">if</span> <span class="ot">@author</span> || <span class="ot">@topic</span>
+      description[<span class="st">:metadata</span>] = {}
+      description[<span class="st">:metadata</span>][<span class="st">:author</span>]=<span class="ot">@author</span>  <span class="kw">if</span> !<span class="ot">@author</span>.nil?
+      description[<span class="st">:metadata</span>][<span class="st">:topic</span>]=<span class="ot">@topic</span>    <span class="kw">if</span> !<span class="ot">@topic</span>.nil?
+    <span class="kw">end</span>
+
+    <span class="kw">if</span> <span class="ot">@contents</span>
+      grid_file = <span class="dt">Mongo</span>::<span class="dt">Grid</span>::<span class="dt">File</span>.new(<span class="ot">@contents</span>.read, description )
+      id=<span class="dv">self</span>.class.mongo_client.database.fs.insert_one(grid_file)
+      <span class="ot">@id</span>=id.to_s
+    <span class="kw">end</span>
+  <span class="kw">end</span></code></pre></li>
+<li><p>Take the new method for a test drive.</p>
+<p>Launch the <code>rails console</code></p>
+<pre class="sourceCode ruby"><code class="sourceCode ruby">$ rails c
+<span class="dt">Loading</span> development environment (<span class="dt">Rails</span> <span class="fl">4.2</span>.<span class="dv">4</span>)</code></pre>
+<p>Create an (File) IO object with the contents of a file</p>
+<pre class="sourceCode ruby"><code class="sourceCode ruby">&gt; os_file=<span class="dt">File</span>.open(<span class="st">&quot;./db/image1.jpg&quot;</span>)
+ =&gt; <span class="co">#&lt;File:./db/image1.jpg&gt; </span></code></pre>
+<p>New up a model instance, passing in the IO object as the <code>contents</code> and other user-provided fields</p>
+<pre class="sourceCode ruby"><code class="sourceCode ruby">&gt; f=<span class="dt">GridFsFile</span>.new(<span class="st">:author</span> =&gt; <span class="st">&quot;kiran&quot;</span>, <span class="st">:topic</span> =&gt; <span class="st">&quot;cool place&quot;</span>, <span class="st">:contentType=</span>&gt;<span class="st">&quot;image/jpeg&quot;</span>, 
+                   <span class="st">:filename=</span>&gt;<span class="st">&quot;town1.jpg&quot;</span>, <span class="st">:contents=</span>&gt;os_file)
+ =&gt; <span class="co">#&lt;GridFsFile:0x00000005a836d0 @id=nil, @author=&quot;kiran&quot;, @topic=&quot;cool place&quot;, </span>
+     <span class="ot">@chunkSize</span>=<span class="dv">nil</span>, <span class="ot">@uploadDate</span>=<span class="dv">nil</span>, <span class="ot">@contentType</span>=<span class="st">&quot;image/jpeg&quot;</span>, <span class="ot">@filename</span>=<span class="st">&quot;town1.jpg&quot;</span>, 
+     <span class="ot">@length</span>=<span class="dv">nil</span>, <span class="ot">@md5</span>=<span class="dv">nil</span>, <span class="ot">@contents</span>=<span class="co">#&lt;File:./db/image1.jpg&gt;&gt; </span></code></pre>
+<p>Save the file info and contents to GridFS</p>
+<pre class="sourceCode ruby"><code class="sourceCode ruby">&gt; f.save
+ =&gt; <span class="st">&quot;56458c18e301d0d09c000004&quot;</span> </code></pre></li>
+</ol>
+<h3 id="add-a-find-to-return-a-single-model-instance">Add a Find to Return a Single Model Instance</h3>
+<ol style="list-style-type: decimal">
+<li><p>Declare a set of helper methods (one a class method and the other an instance method) to convert the string form of a BSON::ObjectId back to object form and return that in a query hash since we will be making use of the <code>id</code> mostly in that manner. The instance method operates on the <code>@id</code> attribute. The class method operates on the <code>id</code> passed in as an argument.</p>
+<pre class="sourceCode ruby"><code class="sourceCode ruby"><span class="kw">def</span> <span class="dv">self</span>.id_criteria id
+  {_id<span class="st">:BSON</span>::<span class="dt">ObjectId</span>.from_string(id)}
+<span class="kw">end</span>
+<span class="kw">def</span> id_criteria
+  <span class="dv">self</span>.class.id_criteria <span class="ot">@id</span>
+<span class="kw">end</span></code></pre></li>
+<li><p>Declare a class method to use the <code>fs.find</code> method to locate the file info in GridFS. Use the <code>id_criteria</code> helper method we just created to build a query hash expression for the primary key. Note that we are not yet querying for the file object. That will not occur until we need the contents.</p>
+<pre class="sourceCode ruby"><code class="sourceCode ruby"><span class="kw">def</span> <span class="dv">self</span>.find id
+  f=mongo_client.database.fs.find(id_criteria(id)).first
+  <span class="kw">return</span> f.nil? ? <span class="dv">nil</span> : <span class="dt">GridFsFile</span>.new(f)
+<span class="kw">end</span></code></pre></li>
+<li><p>Take the new method for a test drive.</p>
+<p>Reload the new class implementation into <code>rails console</code>.</p>
+<pre class="sourceCode ruby"><code class="sourceCode ruby">&gt; reload!</code></pre>
+<p>If you do not remember your file ID, use the <code>mongo_client</code> and the <code>find.first</code> command to get a sample file.</p>
+<pre class="sourceCode ruby"><code class="sourceCode ruby">&gt; <span class="dt">GridFsFile</span>.mongo_client.database.fs.find.first[<span class="st">:_id</span>].to_s
+ =&gt; <span class="st">&quot;56458c18e301d0d09c000004&quot;</span></code></pre>
+<p>Get the file info from GridFS and wrap in a Model instance.</p>
+<pre class="sourceCode ruby"><code class="sourceCode ruby">&gt; f=<span class="dt">GridFsFile</span>.find <span class="st">&quot;56458c18e301d0d09c000004&quot;</span>
+ =&gt; <span class="co">#&lt;GridFsFile:0x000000059bf870 @id=&quot;56458c18e301d0d09c000004&quot;, </span>
+        <span class="ot">@author</span>=<span class="st">&quot;kiran&quot;</span>, 
+        <span class="ot">@topic</span>=<span class="st">&quot;cool place&quot;</span>, 
+        <span class="ot">@chunkSize</span>=<span class="dv">261120</span>, 
+        <span class="ot">@uploadDate</span>=<span class="dv">2015-11-13</span> <span class="bn">07</span>:<span class="bn">07</span>:<span class="bn">04</span> <span class="dt">UTC</span>, 
+        <span class="ot">@contentType</span>=<span class="st">&quot;image/jpeg&quot;</span>, 
+        <span class="ot">@filename</span>=<span class="st">&quot;town1.jpg&quot;</span>, 
+        <span class="ot">@length</span>=<span class="dv">307797</span>, 
+        <span class="ot">@md5</span>=<span class="st">&quot;3468ca1c23cc13ac6af493c4642cc72a&quot;</span>, 
+        <span class="ot">@contents</span>=<span class="dv">nil</span>&gt; 
+
+&gt; f.filename
+ =&gt; <span class="st">&quot;town1.jpg&quot;</span> 
+&gt; f.length
+ =&gt; <span class="dv">307797</span> </code></pre></li>
+</ol>
+<h3 id="get-data-contents-from-gridfs">Get Data Contents from GridFS</h3>
+<ol style="list-style-type: decimal">
+<li><p>Add an instance method to implement a custom getter for the <code>contents</code> attribute. This method will use <code>fs.find_one</code> to locate the file object matching the criteria generated by the <code>id_criteria</code> helper method and the instance's primary key. The array of chunks is reduced to a single buffer returned to the caller.</p>
+<pre class="sourceCode ruby"><code class="sourceCode ruby"><span class="kw">def</span> contents
+  <span class="dt">Rails</span>.logger.debug {<span class="st">&quot;getting gridfs content </span><span class="ot">#{@id}</span><span class="st">&quot;</span>}
+  f=<span class="dv">self</span>.class.mongo_client.database.fs.find_one(id_criteria)
+  <span class="kw">if</span> f 
+    buffer = <span class="st">&quot;&quot;</span>
+    f.chunks.reduce([]) <span class="kw">do</span> |x,chunk| 
+        buffer &lt;&lt; chunk.data.data 
+    <span class="kw">end</span>
+    <span class="kw">return</span> buffer
+  <span class="kw">end</span> 
+<span class="kw">end</span></code></pre></li>
+<li><p>Take the new method for a test drive.</p>
+<p>With a handle to the file, we can obtain the bytes of the file data content and simply return the size of the buffer used.</p>
+<pre class="sourceCode ruby"><code class="sourceCode ruby">&gt; reload
+&gt; <span class="dt">GridFsFile</span>.mongo_client.database.fs.find.first[<span class="st">:_id</span>].to_s
+ =&gt; <span class="st">&quot;56458c18e301d0d09c000004&quot;</span>
+&gt; f=<span class="dt">GridFsFile</span>.find <span class="st">&quot;56458c18e301d0d09c000004&quot;</span>
+&gt; f.contents.length
+ =&gt; <span class="dv">319998</span></code></pre></li>
+</ol>
+<h3 id="add-a-find-of-all-model-instances">Add a Find of All Model Instances</h3>
+<ol style="list-style-type: decimal">
+<li><p>Create an instance method to return a collection of model instances that represent the files in GridFS. Note that this is just the file information and not the file data content.</p>
+<pre class="sourceCode ruby"><code class="sourceCode ruby">  <span class="kw">def</span> <span class="dv">self</span>.all
+    files=[]
+    mongo_client.database.fs.find.each <span class="kw">do</span> |r| 
+      files &lt;&lt; <span class="dt">GridFsFile</span>.new(r)
+    <span class="kw">end</span>
+    <span class="kw">return</span> files
+  <span class="kw">end</span></code></pre></li>
+<li><p>Take the new method for a test drive.</p>
+<pre class="sourceCode ruby"><code class="sourceCode ruby">&gt; reload
+&gt; pp <span class="dt">GridFsFile</span>.all.to_a
+[<span class="co">#&lt;GridFsFile:0x000000039beda0</span>
+  <span class="ot">@author</span>=<span class="st">&quot;kiran&quot;</span>,
+  <span class="ot">@chunkSize</span>=<span class="dv">261120</span>,
+  <span class="ot">@contentType</span>=<span class="st">&quot;image/jpeg&quot;</span>,
+  <span class="ot">@contents</span>=<span class="dv">nil</span>,
+  <span class="ot">@filename</span>=<span class="st">&quot;town1.jpg&quot;</span>,
+  <span class="ot">@id</span>=<span class="st">&quot;56458c18e301d0d09c000004&quot;</span>,
+  <span class="ot">@length</span>=<span class="dv">307797</span>,
+  <span class="ot">@md5</span>=<span class="st">&quot;3468ca1c23cc13ac6af493c4642cc72a&quot;</span>,
+  <span class="ot">@topic</span>=<span class="st">&quot;cool place&quot;</span>,
+  <span class="ot">@uploadDate</span>=<span class="dv">2015-11-13</span> <span class="bn">07</span>:<span class="bn">07</span>:<span class="bn">04</span> <span class="dt">UTC</span>&gt;]</code></pre></li>
+</ol>
+<h3 id="add-an-update-of-the-model-instance">Add an Update of the Model Instance</h3>
+<ol style="list-style-type: decimal">
+<li><p>Just leave this empty for now. We will not be updating files.</p>
+<pre class="sourceCode ruby"><code class="sourceCode ruby"><span class="kw">def</span> update params
+  <span class="co">#TODO</span>
+<span class="kw">end</span></code></pre></li>
+</ol>
+<h3 id="add-a-delete-of-the-model-instance">Add a Delete of the Model Instance</h3>
+<ol style="list-style-type: decimal">
+<li><p>Add an instance method to destroy the file associated with the instance's primary key. We use the <code>fs.find</code> method and our helper <code>id_criteria</code> to locate and delete the file info and contents from GridFS.</p>
+<pre class="sourceCode ruby"><code class="sourceCode ruby"><span class="kw">def</span> destroy
+  <span class="dv">self</span>.class.mongo_client.database.fs.find(id_criteria).delete_one
+<span class="kw">end</span></code></pre></li>
+<li><p>Take the new method for a test drive.</p>
+<pre class="sourceCode ruby"><code class="sourceCode ruby">&gt; reload!
+&gt; f=<span class="dt">GridFsFile</span>.find <span class="st">&quot;56458c18e301d0d09c000004&quot;</span>
+&gt; f.destroy
+ =&gt; <span class="co">#&lt;Mongo::Operation::Result:50114800 documents=[{&quot;ok&quot;=&gt;1, &quot;n&quot;=&gt;1}]&gt; </span>
+&gt; pp <span class="dt">GridFsFile</span>.all.to_a
+ =&gt; [] </code></pre></li>
+</ol>
+<h2 id="add-rails-scaffold">Add Rails Scaffold</h2>
+<ol style="list-style-type: decimal">
+<li><p>Generate a controller and view that can process all attributes. Note that we are violating the Rails standard by using the camelCase attribute names provided by GridFS here to save some field making (i.e., mapping content_type &lt;-&gt; contentType). It may be worth it to cut down on transation code in a demo like this, but add the mapping in a real application. Note also that we are declaring uploadDate as a string. That is because this field is internally generated by GridFS at upload time and we will treat it as a read-only attribute. The default text display of a date looks much better than the default date widget added by Rails when this is a read-only field.</p>
+<pre><code>$ rails g scaffold_controller GridFsFile filename contentType author topic \
+uploadDate length:integer chunkSize:integer md5 contents</code></pre></li>
+<li><p>Update the <code>routes.rb</code> to add our resource and make it the root URI for the application.</p>
+<pre class="sourceCode ruby"><code class="sourceCode ruby"><span class="dt">Rails</span>.application.routes.draw <span class="kw">do</span>
+  root to: <span class="st">&#39;grid_fs_files#index&#39;</span>
+  resources <span class="st">:grid_fs_files</span></code></pre>
+<pre class="shell"><code>$ rake routes
+           Prefix Verb   URI Pattern                           Controller#Action
+             root GET    /                                     grid_fs_files#index
+    grid_fs_files GET    /grid_fs_files(.:format)              grid_fs_files#index
+                  POST   /grid_fs_files(.:format)              grid_fs_files#create
+ new_grid_fs_file GET    /grid_fs_files/new(.:format)          grid_fs_files#new
+edit_grid_fs_file GET    /grid_fs_files/:id/edit(.:format)     grid_fs_files#edit
+     grid_fs_file GET    /grid_fs_files/:id(.:format)          grid_fs_files#show
+                  PATCH  /grid_fs_files/:id(.:format)          grid_fs_files#update
+                  PUT    /grid_fs_files/:id(.:format)          grid_fs_files#update
+                  DELETE /grid_fs_files/:id(.:format)          grid_fs_files#destroy</code></pre></li>
+</ol>
+<h2 id="serve-up-file-contents">Serve Up File Contents</h2>
+<ol style="list-style-type: decimal">
+<li><p>Add an additional route to our controller for data content</p>
+<pre class="sourceCode ruby"><code class="sourceCode ruby">  get <span class="st">&#39;/grid_fs_files/contents/:id/&#39;</span>, to: <span class="st">&#39;grid_fs_files#contents&#39;</span>, as: <span class="st">&#39;contents&#39;</span></code></pre>
+<pre class="shell"><code>$ rake routes
+           Prefix Verb   URI Pattern                           Controller#Action
+         contents GET    /grid_fs_files/contents/:id(.:format) grid_fs_files#contents</code></pre></li>
+<li><p>Implment the <code>contents</code> action in terms of getting the model instance associated with the <code>id</code> and returning the image contents.</p>
+<p>Add the contents method to the <code>before_action</code></p>
+<pre class="sourceCode ruby"><code class="sourceCode ruby"><span class="kw">class</span> <span class="dt">GridFsFilesController</span> &lt; <span class="dt">ApplicationController</span>
+  before_action <span class="st">:set_grid_fs_file</span>, only: [<span class="st">:show</span>, <span class="st">:edit</span>, <span class="st">:update</span>, <span class="st">:destroy</span>, <span class="st">:contents</span>]</code></pre>
+<p>Add the contents method that sends the data from the model.contents with several HTTP content properties.</p>
+<pre class="sourceCode ruby"><code class="sourceCode ruby"><span class="kw">def</span> contents
+  send_data <span class="ot">@grid_fs_file</span>.contents, 
+            {filename: <span class="ot">@grid_fs_file</span>.filename, type: <span class="ot">@grid_fs_file</span>.contentType, disposition: <span class="st">&#39;inline&#39;</span>}
+<span class="kw">end</span></code></pre></li>
+<li><p>Start the server and take the new controller method for a test drive.</p>
+<p>Start the server</p>
+<pre class="shell"><code>$ rails s</code></pre>
+<p>Populate GridFS with an image from <code>rails console</code></p>
+<pre class="sourceCode ruby"><code class="sourceCode ruby">&gt; os_file=<span class="dt">File</span>.open(<span class="st">&quot;./db/image1.jpg&quot;</span>)
+ =&gt; <span class="co">#&lt;File:./db/image1.jpg&gt; </span>
+&gt; f=<span class="dt">GridFsFile</span>.new(<span class="st">:author</span> =&gt; <span class="st">&quot;kiran&quot;</span>, <span class="st">:topic</span> =&gt; <span class="st">&quot;cool place&quot;</span>, <span class="st">:contentType=</span>&gt;<span class="st">&quot;image/jpeg&quot;</span>, 
+                   <span class="st">:filename=</span>&gt;<span class="st">&quot;town1.jpg&quot;</span>, <span class="st">:contents=</span>&gt;os_file)
+&gt; f.save
+ =&gt; <span class="st">&quot;5645a2b3e301d0d09c000017&quot;</span> </code></pre>
+<p>Access the image from the following URL, replacing the BSON::ObjectId with whatever image you wish to access.</p>
+<pre class="shell"><code>http://localhost:3000/grid_fs_files/contents/5645a2b3e301d0d09c000017</code></pre></li>
+</ol>
+<h2 id="add-upload-and-ui-display">Add Upload and UI Display</h2>
+<h3 id="update-view-references-to-content">Update View References to <code>content</code></h3>
+<ol style="list-style-type: decimal">
+<li><p>Update the fields displayed on the HTML index page (<code>app/views/grid_fs_files/index.html.erb</code>) to include a thumbnail version of the image and remove some of the larger fields (e.g., md5) that are available on the show page.</p>
+<p><code>html   &lt;th&gt;Contents&lt;/th&gt;   &lt;th&gt;Filename&lt;/th&gt;   &lt;th&gt;Contenttype&lt;/th&gt;   &lt;th&gt;Author&lt;/th&gt;   &lt;th&gt;Topic&lt;/th&gt;   &lt;th&gt;Uploaddate&lt;/th&gt;   &lt;th&gt;Length&lt;/th&gt;</code> Include a &quot;thumbnail-sized&quot; version of the contents on each line using the <code>img</code> tag.</p>
+<p><code>html     &lt;td&gt;&lt;img height=&quot;100px&quot; width=&quot;130px&quot; src= &lt;%= contents_path(&quot;#{grid_fs_file.id}&quot;)%&gt;/&gt;&lt;/td&gt;     &lt;td&gt;&lt;%= grid_fs_file.filename %&gt;&lt;/td&gt;     &lt;td&gt;&lt;%= grid_fs_file.contentType %&gt;&lt;/td&gt;     &lt;td&gt;&lt;%= grid_fs_file.author %&gt;&lt;/td&gt;     &lt;td&gt;&lt;%= grid_fs_file.topic %&gt;&lt;/td&gt;     &lt;td&gt;&lt;%= grid_fs_file.uploadDate %&gt;&lt;/td&gt;     &lt;td&gt;&lt;%= grid_fs_file.length %&gt;&lt;/td&gt;</code></p></li>
+<li><p>Remove the <code>contents</code> from the JSON view. <code>app/views/grid_fs_files/index.json.jbuilder</code></p>
+<p><code>ruby   #TODO: fix this   json.extract! grid_fs_file, :id, :filename, :contentType, :author, :topic, :uploadDate, :length, :chunkSize, :md5</code></p></li>
+<li><p>Update the <code>app/views/grid_fs_files/_form.html.erb</code> from a <code>text_field</code> to a <code>file_field</code></p>
+<pre class="sourceCode html"><code class="sourceCode html"><span class="kw">&lt;div</span><span class="ot"> class=</span><span class="st">&quot;field&quot;</span><span class="kw">&gt;</span>
+  <span class="er">&lt;</span>%= f.label :contents %&gt;<span class="kw">&lt;br&gt;</span>
+  <span class="er">&lt;</span>%= f.file_field :contents %&gt;
+<span class="kw">&lt;/div&gt;</span></code></pre></li>
+<li><p>Update the show page to display the image from our contents URI with an <code>img</code> tag in <code>app/views/grid_fs_files/show.html.erb</code></p>
+<pre class="sourceCode html"><code class="sourceCode html"><span class="kw">&lt;p&gt;</span>
+  <span class="kw">&lt;strong&gt;</span>Contents:<span class="kw">&lt;/strong&gt;</span>
+  <span class="kw">&lt;img</span><span class="ot"> height=</span><span class="st">&quot;1000px&quot;</span><span class="ot"> width=</span><span class="st">&quot;1300px&quot;</span><span class="ot"> src=</span> <span class="er">&lt;</span><span class="st">%=</span><span class="ot"> contents_path</span><span class="er">(&quot;#{@grid_fs_file.id}&quot;)%</span><span class="kw">&gt;</span>/&gt;
+<span class="kw">&lt;/p&gt;</span></code></pre></li>
+<li><p>Mark the GridFS-managed fields readonly.</p>
+<pre class="sourceCode html"><code class="sourceCode html"><span class="kw">&lt;div</span><span class="ot"> class=</span><span class="st">&quot;field&quot;</span><span class="kw">&gt;</span>
+  <span class="er">&lt;</span>%= f.label :uploadDate %&gt;<span class="kw">&lt;br&gt;</span>
+  <span class="er">&lt;</span>%= f.text_field :uploadDate, :readonly =&gt; true %&gt;
+<span class="kw">&lt;/div&gt;</span>
+<span class="kw">&lt;div</span><span class="ot"> class=</span><span class="st">&quot;field&quot;</span><span class="kw">&gt;</span>
+  <span class="er">&lt;</span>%= f.label :length %&gt;<span class="kw">&lt;br&gt;</span>
+  <span class="er">&lt;</span>%= f.number_field :length, :readonly =&gt; true %&gt;
+<span class="kw">&lt;/div&gt;</span>
+<span class="kw">&lt;div</span><span class="ot"> class=</span><span class="st">&quot;field&quot;</span><span class="kw">&gt;</span>
+  <span class="er">&lt;</span>%= f.label :chunkSize %&gt;<span class="kw">&lt;br&gt;</span>
+  <span class="er">&lt;</span>%= f.number_field :chunkSize, :readonly =&gt; true %&gt;
+<span class="kw">&lt;/div&gt;</span>
+<span class="kw">&lt;div</span><span class="ot"> class=</span><span class="st">&quot;field&quot;</span><span class="kw">&gt;</span>
+  <span class="er">&lt;</span>%= f.label :md5 %&gt;<span class="kw">&lt;br&gt;</span>
+  <span class="er">&lt;</span>%= f.text_field :md5, :readonly =&gt; true %&gt;
+<span class="kw">&lt;/div&gt;</span></code></pre></li>
+</ol>
+<h3 id="take-for-a-test-drive">Take for a Test Drive</h3>
+<ol style="list-style-type: decimal">
+<li><p>Navigate to root URL</p>
+<pre class="url"><code>http://localhost:3000/</code></pre></li>
+<li><p>Click <code>New Grid_fs_file</code></p></li>
+<li><p>File in the following fields. Do not bother typing in the other fields that are supplied by GridFS.</p>
+<ul>
+<li>Filename</li>
+<li>Contenttype</li>
+<li>Author</li>
+<li>Topic</li>
+</ul></li>
+<li><p>Select <code>Choose File</code> and select image</p></li>
+<li><p>Click <code>Create Grid_fs_file</code></p></li>
+<li><p>Click <code>Back</code> to go back to index.</p></li>
+</ol>
+<h2 id="heroku-deployment">Heroku Deployment</h2>
+<p>This deployment assumes that you have already deployed the <code>Zips</code> and <code>GeoZips</code> applications and will quickly go thru the steps taken to reach Heroku deployment.</p>
+<ol style="list-style-type: decimal">
+<li><p>Register your application with Heroku by changing to the directory with a git repository and invoking <code>heroku apps:create (appname)</code>.</p>
+<p><strong>Note that your application must be in the root directory of the development folder hosting the git repository.</strong></p>
+<pre><code>$ cd fullstack-course3-module2-gridfsfiles
+$ heroku apps:create appname
+Creating appname... done, stack is cedar-14
+https://appname.herokuapp.com/ | https://git.heroku.com/appname.git
+Git remote heroku added</code></pre>
+<p>This will add an additional remote to your git repository.</p>
+<pre class="shell"><code>$ git remote --verbose
+heroku  https://git.heroku.com/appname.git (fetch)
+heroku  https://git.heroku.com/appname.git (push)
+...</code></pre></li>
+<li><p>Verify the Gemfile is setup to support ActiveRecord when deployed to Heroku. This is required because we have not removed it from our application.</p>
+<pre class="sourceCode ruby"><code class="sourceCode ruby"><span class="co"># Use sqlite3 as the database for Active Record</span>
+gem <span class="st">&#39;sqlite3&#39;</span>, group: <span class="st">:development</span>
+...
+group <span class="st">:production</span> <span class="kw">do</span>
+  <span class="co">#use postgres on heroku</span>
+  gem <span class="st">&#39;pg&#39;</span>
+  gem <span class="st">&#39;rails_12factor&#39;</span>
+<span class="kw">end</span></code></pre></li>
+<li><p>Create a new MongoDB database and database user on <a href="https://mongolab.com/create"><code>MongoLabs</code></a></p></li>
+<li><p>Add a <code>MONGOLAB_URI</code> environment variable to the environment to define the databaase connection when deployed to Heroku. <code>dbhost</code> is both host and port# concatenated together, separated by a &quot;:&quot; (host:port) in this example.</p>
+<pre class="shell"><code>$ heroku config:add MONGOLAB_URI=mongodb://dbuser:dbpass@dbhost/dbname</code></pre></li>
+<li><p>Verify the <code>config/mongoid.yml</code> has a <code>production</code> profile to accept the newly added environment variable.</p>
+<pre class="shell"><code>production:
+  clients:
+    default:
+      uri: &lt;%= ENV[&#39;MONGOLAB_URI&#39;] %&gt;
+      options:
+        connect_timeout: 15</code></pre></li>
+<li><p>Run bundle and commit any changes.</p></li>
+<li><p>Deploy application</p>
+<pre class="shell"><code>$ git push heroku master</code></pre></li>
+</ol>
+<h2 id="access-application">Access Application</h2>
+<ol style="list-style-type: decimal">
+<li><p>Access URL</p>
+<pre class="url"><code>http://appname.herokuapp.com/</code></pre></li>
+<li><p>Access &quot;New Grid gs file&quot; to upload a new image into GridFS.</p></li>
+</ol>

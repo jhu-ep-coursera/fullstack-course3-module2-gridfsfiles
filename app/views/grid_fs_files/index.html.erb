@@ -1,0 +1,39 @@
+<p id="notice"><%= notice %></p>
+
+<h1>Listing Grid Fs Files</h1>
+
+<table>
+  <thead>
+    <tr>
+      <th>Contents</th>
+      <th>Filename</th>
+      <th>Contenttype</th>
+      <th>Author</th>
+      <th>Topic</th>
+      <th>Uploaddate</th>
+      <th>Length</th>
+      <th colspan="3"></th>
+    </tr>
+  </thead>
+
+  <tbody>
+    <% @grid_fs_files.each do |grid_fs_file| %>
+      <tr>
+        <td><img height="100px" width="130px" src= <%= contents_path("#{grid_fs_file.id}")%>/></td>
+        <td><%= grid_fs_file.filename %></td>
+        <td><%= grid_fs_file.contentType %></td>
+        <td><%= grid_fs_file.author %></td>
+        <td><%= grid_fs_file.topic %></td>
+        <td><%= grid_fs_file.uploadDate %></td>
+        <td><%= grid_fs_file.length %></td>
+        <td><%= link_to 'Show', grid_fs_file %></td>
+        <td><%= link_to 'Edit', edit_grid_fs_file_path(grid_fs_file) %></td>
+        <td><%= link_to 'Destroy', grid_fs_file, method: :delete, data: { confirm: 'Are you sure?' } %></td>
+      </tr>
+    <% end %>
+  </tbody>
+</table>
+
+<br>
+
+<%= link_to 'New Grid fs file', new_grid_fs_file_path %>
